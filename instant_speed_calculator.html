@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>حاسبة وقت التحميل — سرعة الإنترنت الفعلية</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.5rem; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .row > * { flex: 1 1 220px; }
+    input, button, select { font-size: 1rem; padding: 10px; border-radius: 8px; border: 1px solid #ccc; width: 100%; }
+    button { cursor: pointer; }
+    .muted { color: #666; font-size: 0.92rem; }
+    .speed { font-size: 2rem; font-weight: 700; }
+    .pill { display: inline-block; padding: 6px 10px; border: 1px solid #ddd; border-radius: 999px; margin: 4px 6px 0 0; cursor: pointer; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  </style>
+</head>
+<body>
+  <h1>حاسبة وقت التحميل — مرتبطة بسرعة الإنترنت الحالية</h1>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="muted">السرعة الحالية (تقديري)</div>
+        <div id="speedVal" class="speed mono">—</div>
+      </div>
+      <div>
+        <div class="muted">متوسط آخر القياسات</div>
+        <div id="avgSpeed" class="mono">—</div>
+      </div>
+      <div>
+        <div class="muted">دقّة أعلى؟</div>
+        <button id="runNow">قياس الآن</button>
+      </div>
+    </div>
+    <div class="muted" id="status">يجري التحضير لأول قياس…</div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="sizeInput" class="muted">حجم الملف</label>
+        <input id="sizeInput" type="number" min="0" step="0.01" placeholder="مثال: 700" />
+      </div>
+      <div>
+        <label for="unitSelect" class="muted">الوحدة</label>
+        <select id="unitSelect">
+          <option value="MB">ميغابايت (MB)</option>
+          <option value="GB">غيغابايت (GB)</option>
+        </select>
+      </div>
+      <div>
+        <label class="muted">الوقت التقديري</label>
+        <div id="eta" class="mono" style="font-size:1.25rem">—</div>
+      </div>
+    </div>
+    <div class="muted">يتم تحديث الوقت تلقائياً عند تغيّر السرعة أو الحجم.</div>
+  </div>
+
+  <div class="card">
+    <div class="muted">أحجام جاهزة:</div>
+    <div id="presets" class="grid" style="margin-top:8px;"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>كيف يتم القياس؟</summary>
+      <p class="muted">
+        يتم حساب السرعة عن طريق تنزيل جزء بيانات (افتراضيًا 20 ميغابايت) من خدمة عامة
+        ثم قياس الزمن. النتيجة تقريبية وقد تتأثر بمزوّد الخدمة، الخادم، أو ازدحام الشبكة.
+      </p>
+    </details>
+  </div>
+
+<script>
+(function(){
+  const statusEl = document.getElementById('status');
+  const speedEl = document.getElementById('speedVal');
+  const avgEl = document.getElementById('avgSpeed');
+  const etaEl = document.getElementById('eta');
+  const sizeInput = document.getElementById('sizeInput');
+  const unitSelect = document.getElementById('unitSelect');
+  const runNowBtn = document.getElementById('runNow');
+  const presetsEl = document.getElementById('presets');
+
+  // Preset buttons
+  const presets = [
+    {label: "أغنية MP3 5MB", mb: 5},
+    {label: "تطبيق 100MB", mb: 100},
+    {label: "فيلم 1GB", mb: 1024},
+    {label: "فيلم 4K 10GB", mb: 10240},
+    {label: "نسخة احتياطية 50GB", mb: 51200}
+  ];
+  presets.forEach(p => {
+    const b = document.createElement('button');
+    b.textContent = p.label;
+    b.className = 'pill';
+    b.addEventListener('click', ()=>{
+      sizeInput.value = p.mb >= 1024 ? (p.mb/1024).toFixed(2) : p.mb;
+      unitSelect.value = p.mb >= 1024 ? 'GB' : 'MB';
+      updateETA();
+    });
+    presetsEl.appendChild(b);
+  });
+
+  // Speed samples history
+  const samples = [];
+  const maxSamples = 7;
+
+  // Convert bits/bytes helpers
+  function mbpsToMBps(mbps){ return mbps / 8; }
+  function fileMB(unit, value){
+    const v = parseFloat(value || '0');
+    return unit === 'GB' ? v * 1024 : v;
+  }
+
+  function formatETA(seconds){
+    if (!isFinite(seconds) || seconds <= 0) return '—';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.round(seconds % 60);
+    let out = [];
+    if (h) out.push(h + ' س');
+    if (m) out.push(m + ' د');
+    out.push((s<10 && (h||m)) ? ('0' + s + ' ث') : (s + ' ث'));
+    return out.join(' ');
+  }
+
+  function updateETA(){
+    const mb = fileMB(unitSelect.value, sizeInput.value);
+    const currentMbps = samples.length ? samples[samples.length-1] : 0;
+    const MBps = mbpsToMBps(currentMbps);
+    const seconds = MBps > 0 ? (mb / MBps) : Infinity;
+    etaEl.textContent = formatETA(seconds);
+  }
+
+  sizeInput.addEventListener('input', updateETA);
+  unitSelect.addEventListener('change', updateETA);
+
+  function updateDisplays(){
+    const current = samples.length ? samples[samples.length-1] : null;
+    const avg = samples.length ? (samples.reduce((a,b)=>a+b,0) / samples.length) : null;
+    speedEl.textContent = current ? current.toFixed(2) + ' Mbps' : '—';
+    avgEl.textContent = avg ? avg.toFixed(2) + ' Mbps' : '—';
+    updateETA();
+  }
+
+  async function measureOnce(bytes = 20 * 1024 * 1024){
+    // Cloudflare speed endpoint returns random bytes
+    const url = 'https://speed.cloudflare.com/__down?bytes=' + bytes + '&cacheBust=' + Math.random();
+    statusEl.textContent = 'يجري القياس…';
+    const t0 = performance.now();
+    let ok = false, mbps = null;
+    try {
+      const res = await fetch(url, { cache: 'no-store', mode: 'cors' });
+      const buf = await res.arrayBuffer();
+      const t1 = performance.now();
+      ok = true;
+      const seconds = (t1 - t0) / 1000;
+      const bits = buf.byteLength * 8;
+      mbps = (bits / seconds) / (1024*1024); // Mbps (using Mi, but close enough)
+    } catch (e){
+      console.warn(e);
+    }
+    if (ok && isFinite(mbps)){
+      samples.push(mbps);
+      if (samples.length > maxSamples) samples.shift();
+      updateDisplays();
+      statusEl.textContent = 'تم القياس للتو.';
+    } else {
+      statusEl.textContent = 'تعذّر القياس. تحقق من الاتصال أو جرب زر "قياس الآن".';
+    }
+  }
+
+  // Schedule: first run, then every 30s
+  runNowBtn.addEventListener('click', ()=>measureOnce());
+  measureOnce(); // initial
+  setInterval(()=>measureOnce(), 30000);
+
+  // If Network Information API is available, seed an initial estimate
+  try {
+    if (navigator.connection && navigator.connection.downlink){
+      const seed = navigator.connection.downlink * 1000 / 1000; // already Mbps
+      samples.push(seed);
+      updateDisplays();
+      statusEl.textContent = 'تم التمهيد بتقدير المتصفح، وسيتم القياس الفعلي الآن…';
+    }
+  } catch(e){}
+})();
+</script>
+</body>
+</html>
